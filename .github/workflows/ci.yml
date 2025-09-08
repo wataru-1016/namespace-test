@@ -12,38 +12,69 @@ jobs:
 
     services:
       postgres:
-        image: postgres:latest
+        image: postgres:15-alpine
         env:
           POSTGRES_PASSWORD: postgres
           POSTGRES_USER: postgres
           POSTGRES_DB: test_db
+          POSTGRES_INITDB_ARGS: "--data-checksums --encoding=UTF8"
         ports:
           - 5432:5432
         options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
+          --health-cmd "pg_isready -U postgres -d test_db"
+          --health-interval 3s
+          --health-timeout 2s
           --health-retries 5
+          --health-start-period 10s
+          --shm-size=256m
+
+    permissions:
+      id-token: write
+      contents: read
 
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v4
+      uses: namespacelabs/nscloud-checkout-action@v7
+
+    - name: Configure access to Namespace
+      uses: namespacelabs/nscloud-setup@v0
+    - run: nsc build . --name app:latest --push
 
     - name: Setup Node.js
       uses: actions/setup-node@v4
       with:
         node-version: 'lts/*'
 
+    - name: Cache node modules
+      uses: namespacelabs/nscloud-cache-action@v1
+      with:
+        path: |
+          ~/.npm
+          ~/.cache/npm
+          node_modules
+          ~/.cache/yarn
+          ~/.yarn/cache
+
     - name: Install dependencies
       run: npm install
 
     - name: Wait for PostgreSQL
       run: |
-        until pg_isready -h localhost -p 5432 -U postgres -d test_db; do
-          echo "Waiting for PostgreSQL..."
-          sleep 2
+        echo "Waiting for PostgreSQL to be ready..."
+        for i in {1..30}; do
+          if pg_isready -h localhost -p 5432 -U postgres -d test_db >/dev/null 2>&1; then
+            echo "PostgreSQL is ready!"
+            break
+          fi
+          echo "Attempt $i/30: PostgreSQL not ready, waiting 1 second..."
+          sleep 1
         done
-        echo "PostgreSQL is ready!"
+
+        # Double check the connection
+        if ! pg_isready -h localhost -p 5432 -U postgres -d test_db; then
+          echo "PostgreSQL failed to start within 30 seconds"
+          exit 1
+        fi
 
     - name: Run tests
       run: npm test
