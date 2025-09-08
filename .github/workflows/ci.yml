@@ -44,6 +44,7 @@ jobs:
       uses: actions/setup-node@v4
       with:
         node-version: 'lts/*'
+        cache: "" # Use Namespace caching instead
 
     - name: Cache node modules
       uses: namespacelabs/nscloud-cache-action@v1
